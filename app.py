@@ -89,6 +89,10 @@ def save_presets(presets):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        # UI hotfix: guarantee enough width for controls
+        self.minsize(1024, 720)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
         self.title("PixelArt Maker")
         self.geometry("820x520")
         self.resizable(True, True)
@@ -141,17 +145,13 @@ class App(tk.Tk):
         frm_set.pack(fill='x', **pad)
         ttk.Label(frm_set, text="Palette").grid(row=0, column=0, sticky='w')
         cmb = ttk.Combobox(frm_set, textvariable=self.palette_name, values=sorted(PALETTES.keys()), state="readonly", width=30)
-        cmb.grid(row=0, column=1, sticky='w')
-
+        cmb.grid(row=0, column=1, sticky='ew')
         def on_palette_change(event=None):
             name = self.palette_name.get()
             if name.startswith("General_") or name in ADAPTIVE_SPECIAL:
-                if hasattr(self, "spin_adapt"):
-                    self.spin_adapt.state(["!disabled"])
+                getattr(self, 'spin_adapt', None) and self.spin_adapt.state(["!disabled"])
             else:
-                if hasattr(self, "spin_adapt"):
-                    self.spin_adapt.state(["disabled"])
-
+                getattr(self, 'spin_adapt', None) and self.spin_adapt.state(["disabled"])
         cmb.bind("<<ComboboxSelected>>", on_palette_change)
 
         ttk.Label(frm_set, text="Block size").grid(row=0, column=2, sticky='e')
@@ -163,13 +163,15 @@ class App(tk.Tk):
         ttk.Label(frm_set, text="Contrast").grid(row=1, column=2, sticky='e')
         ttk.Spinbox(frm_set, from_=0.1, to=2.0, increment=0.05, textvariable=self.contrast, width=6).grid(row=1, column=3)
         ttk.Label(frm_set, text="Gamma").grid(row=1, column=4, sticky='e')
-        ttk.Spinbox(frm_set, from_=0.5, to=2.0, increment=0.05, textvariable=self.gamma, width=6).grid(row=1, column=5)
-        ttk.Label(frm_set, text="Adaptive colors").grid(row=1, column=6)
-        self.spin_adapt = ttk.Spinbox(frm_set, from_=16, to=512, textvariable=self.adaptive_colors, width=6)
-        self.spin_adapt.grid(row=1, column=7)
-
-        # 스핀박스가 만들어진 뒤에 초기 상태 설정
-        on_palette_change()
+        ttk.Spinbox(frm_set, from_=0.5, to=2.0, increment=0.05, textvariable=self.gamma, width=8, justify='right').grid(row=1, column=5, sticky='ew')
+        ttk.Label(frm_set, text="Adaptive").grid(row=1, column=6, sticky='e')
+        self.spin_adapt = ttk.Spinbox(frm_set, from_=16, to=512, textvariable=self.adaptive_colors, width=8, justify='right')
+        self.spin_adapt.grid(row=1, column=7, sticky='ew')
+        # initialize adaptive spin state after creation
+        try:
+            on_palette_change()
+        except Exception:
+            pass
 
         # GIF options
         frm_gif = ttk.LabelFrame(self, text="GIF (optional)")

@@ -15,6 +15,6 @@ DEFAULT_PRESETS = {
   },
   "Ghibli_Forest_Warm": {
     "palette": "Ghibli_Totoro_Tree",
-    "block": 3, "dither": True, "saturation": 1.1, "contrast": 1.05, "gamma": 0.98
+    "block": 3, "dither": False, "saturation": 1.1, "contrast": 1.05, "gamma": 0.98
   }
 }
