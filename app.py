@@ -4,10 +4,71 @@ from tkinter import ttk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
-from pixelart.palettes import PALETTES, DEFAULT_PALETTE
+from pixelart.palettes import PALETTES, DEFAULT_PALETTE, ADAPTIVE_SPECIAL
 from pixelart.processor import pipeline
 from pixelart.gifmaker import make_subtle_gif, save_gif
 from pixelart.presets import DEFAULT_PRESETS
+
+from pixelart.anchors import DEFAULT_ANCHORS_PATH
+import numpy as np
+from PIL import Image
+import glob, json, os
+
+def build_anchors_from_folder(folder, out_path=DEFAULT_ANCHORS_PATH, k=42, max_per=80000):
+    # Collect pixels from images in folder
+    paths = []
+    for ext in ("*.jpg","*.jpeg","*.png","*.webp","*.bmp","*.tif","*.tiff"):
+        paths += glob.glob(os.path.join(folder, ext))
+    if not paths:
+        raise RuntimeError("No images in folder")
+    from pixelart.processor import rgb_to_oklab, oklab_to_rgb, _nearest_oklab
+    def load_px(p):
+        im = Image.open(p).convert("RGB")
+        w,h = im.size
+        scale = 768 / max(w,h)
+        if scale < 1: im = im.resize((int(w*scale), int(h*scale)), Image.Resampling.BILINEAR)
+        arr = np.asarray(im).reshape(-1,3)
+        N = min(max_per, len(arr))
+        idx = np.random.choice(len(arr), N, replace=False)
+        return arr[idx]
+    arrs = [load_px(p) for p in paths]
+    arr = np.vstack(arrs)
+    lab = rgb_to_oklab(arr.astype(np.float32))
+    # luminance bins
+    L = lab[:,0]; bins = np.digitize(L, np.linspace(L.min(), L.max(), 8))
+    cents = []
+    def kmeans(samples, kk):
+        import numpy as np
+        n=len(samples); 
+        if n==0: return np.zeros((0,3),dtype=np.float32)
+        c = samples[np.random.choice(n, size=min(kk,n), replace=False)].astype(np.float32)
+        for _ in range(20):
+            d=((samples[:,None,:]-c[None,:,:])**2).sum(axis=2)
+            lab=d.argmin(axis=1)
+            for i in range(len(c)):
+                pts=samples[lab==i]
+                if len(pts)>0: c[i]=pts.mean(axis=0)
+        return c
+    for b in range(1,8):
+        subset = lab[bins==b]
+        if len(subset)<50: continue
+        kk = 6 if b in (1,7) else 5
+        cents.append(kmeans(subset, kk))
+    cents = np.vstack(cents)
+    rgb = oklab_to_rgb(cents)
+    # add explicit anchors
+    extra = np.array([[252,252,252],[12,12,12],[28,110,216],[19,118,204],[100,180,255]], dtype=np.uint8)
+    rgb = np.vstack([extra, rgb])
+    # dedup coarse
+    uniq = {}
+    for c in rgb:
+        uniq[tuple((c//4).tolist())]=c
+    data = {"name":"CustomRefSet","rgb":[v.tolist() for v in uniq.values()]}
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path,"w",encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return out_path, len(data["rgb"])
+
 
 PRESET_STORE = os.path.expanduser("~/.pixelart_maker/presets.json")
 
@@ -40,6 +101,7 @@ class App(tk.Tk):
         self.saturation = tk.DoubleVar(value=1.05)
         self.contrast = tk.DoubleVar(value=1.05)
         self.gamma = tk.DoubleVar(value=1.0)
+        self.adaptive_colors = tk.IntVar(value=256)
         self.palette_name = tk.StringVar(value=DEFAULT_PALETTE)
         self.make_gif = tk.BooleanVar(value=False)
         self.gif_frames = tk.IntVar(value=12)
@@ -65,11 +127,30 @@ class App(tk.Tk):
         frm_paths.columnconfigure(1, weight=1)
 
         # Settings
+        # Reference anchors
+        frm_ref = ttk.LabelFrame(self, text="Reference Anchors (optional)")
+        frm_ref.pack(fill='x', **pad)
+        self.ref_dir = tk.StringVar()
+        ttk.Label(frm_ref, text="Reference folder").grid(row=0, column=0, sticky='e')
+        ttk.Entry(frm_ref, textvariable=self.ref_dir, width=70).grid(row=0, column=1, sticky='we')
+        ttk.Button(frm_ref, text="Browse...", command=lambda: self.ref_dir.set(filedialog.askdirectory() or self.ref_dir.get())).grid(row=0, column=2)
+        ttk.Button(frm_ref, text="Build anchors", command=self.build_anchors).grid(row=0, column=3)
+        frm_ref.columnconfigure(1, weight=1)
+
         frm_set = ttk.LabelFrame(self, text="Settings")
         frm_set.pack(fill='x', **pad)
         ttk.Label(frm_set, text="Palette").grid(row=0, column=0, sticky='w')
         cmb = ttk.Combobox(frm_set, textvariable=self.palette_name, values=sorted(PALETTES.keys()), state="readonly", width=30)
         cmb.grid(row=0, column=1, sticky='w')
+        def on_palette_change(event=None):
+            name = self.palette_name.get()
+            if name.startswith("General_") or name in ADAPTIVE_SPECIAL:
+                self.spin_adapt.state(["!disabled"])
+            else:
+                self.spin_adapt.state(["disabled"])
+        cmb.bind("<<ComboboxSelected>>", on_palette_change)
+        on_palette_change()
+
         ttk.Label(frm_set, text="Block size").grid(row=0, column=2, sticky='e')
         ttk.Spinbox(frm_set, from_=1, to=16, textvariable=self.block, width=6).grid(row=0, column=3)
         ttk.Checkbutton(frm_set, text="Dither (Floyd–Steinberg)", variable=self.dither).grid(row=0, column=4, sticky='w')
@@ -80,6 +161,9 @@ class App(tk.Tk):
         ttk.Spinbox(frm_set, from_=0.1, to=2.0, increment=0.05, textvariable=self.contrast, width=6).grid(row=1, column=3)
         ttk.Label(frm_set, text="Gamma").grid(row=1, column=4, sticky='e')
         ttk.Spinbox(frm_set, from_=0.5, to=2.0, increment=0.05, textvariable=self.gamma, width=6).grid(row=1, column=5)
+        ttk.Label(frm_set, text="Adaptive colors").grid(row=1, column=6)
+        self.spin_adapt = ttk.Spinbox(frm_set, from_=16, to=512, textvariable=self.adaptive_colors, width=6)
+        self.spin_adapt.grid(row=1, column=7)
 
         # GIF options
         frm_gif = ttk.LabelFrame(self, text="GIF (optional)")
@@ -166,6 +250,19 @@ class App(tk.Tk):
             self.cmb_preset.set("")
             self.log.insert('end', f"Deleted preset: {name}\n")
 
+
+    def build_anchors(self):
+        folder = self.ref_dir.get()
+        if not folder:
+            messagebox.showwarning("Missing folder", "Select a reference folder first.")
+            return
+        try:
+            out, n = build_anchors_from_folder(folder)
+            self.log.insert('end', f"Built reference anchors ({n} colors) → {out}\n")
+            messagebox.showinfo("Anchors updated", f"Saved {n} anchor colors to\n{out}\nUse palette 'General_Adaptive_RefSet'.")
+        except Exception as e:
+            messagebox.showerror("Failed", str(e))
+
     # Conversion
     def convert(self):
         in_dir = pathlib.Path(self.in_dir.get())
@@ -179,6 +276,7 @@ class App(tk.Tk):
             messagebox.showwarning("No images", "No image files found in the selected input folder.")
             return
 
+        adaptive = int(self.adaptive_colors.get()) if (self.palette_name.get() in ADAPTIVE_SPECIAL or self.palette_name.get().startswith('General_')) else None
         params = dict(
             target_long=512,
             block=int(self.block.get()),
@@ -187,6 +285,7 @@ class App(tk.Tk):
             contrast=float(self.contrast.get()),
             gamma=float(self.gamma.get()),
             palette_hex=PALETTES[self.palette_name.get()],
+            adaptive_colors=adaptive,
         )
 
         self.progress.configure(maximum=len(files), value=0)

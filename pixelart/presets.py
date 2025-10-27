@@ -1,4 +1,6 @@
 DEFAULT_PRESETS = {
+  "Mediterranean": {"palette":"General_Adaptive_RefSet","block":2,"dither":True,"saturation":1.05,"contrast":1.08,"gamma":0.96},
+  "General": {"palette":"General_Adaptive_256", "block": 2, "dither": True, "saturation": 1.0, "contrast": 1.0, "gamma": 1.0},
   "Warm_Sunset_Chunky": {
     "palette": "Sunset_Meadow_Warm",
     "block": 4, "dither": True, "saturation": 1.1, "contrast": 1.05, "gamma": 0.95

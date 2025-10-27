@@ -183,3 +183,9 @@ PALETTES = {
   ]
 }
 DEFAULT_PALETTE = "Sunset_Meadow_Warm"
+
+ADAPTIVE_SPECIAL = {"General_Adaptive_256": 256}
+PALETTES.update({"General_Adaptive_256": []})
+
+PALETTES.update({"General_Adaptive_RefSet": []})
+ADAPTIVE_SPECIAL.update({"General_Adaptive_RefSet": 256})

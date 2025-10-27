@@ -46,7 +46,29 @@ def pixelate(im: Image.Image, block=2):
     small = im.resize((max(1,w//block), max(1,h//block)), Image.Resampling.NEAREST)
     return small.resize((w,h), Image.Resampling.NEAREST)
 
-def pipeline(im: Image.Image, palette_hex, target_long=512, block=2, dither=True, saturation=1.0, contrast=1.0, gamma=1.0, adjust_fn=None):
+
+LOAD_GENERAL_ANCHORS = True
+
+def adaptive_quantize(im: Image.Image, colors=256, dither=True):
+    # Pillow's median-cut adaptive palette quantization
+    dmode = Image.FLOYDSTEINBERG if dither else Image.NONE
+    pal_im = im.quantize(colors=colors, method=Image.MEDIANCUT, dither=dmode)
+    return pal_im.convert("RGB")
+
+def _load_general_anchors():
+    import json, os
+    here = os.path.dirname(os.path.abspath(__file__))
+    assets = os.path.join(os.path.dirname(here), 'assets', 'palette_general_v4.json')
+    if os.path.exists(assets):
+        try:
+            with open(assets,'r') as f:
+                data = json.load(f)
+            return [tuple(map(int, c)) for c in data.get('anchors_rgb', [])]
+        except Exception:
+            return None
+    return None
+
+def pipeline(im: Image.Image, palette_hex, target_long=512, block=2, dither=True, saturation=1.0, contrast=1.0, gamma=1.0, adjust_fn=None, adaptive_colors=None):
     from .utils import load_image_keep_ratio, apply_adjustments
     im = im if isinstance(im, Image.Image) else Image.open(im).convert("RGB")
     # Resize (no crop) by longest side
@@ -58,6 +80,10 @@ def pipeline(im: Image.Image, palette_hex, target_long=512, block=2, dither=True
     im = apply_adjustments(im, saturation=saturation, contrast=contrast, gamma=gamma)
     # pixelation
     im = pixelate(im, block=block)
-    # quantize to palette
-    im = floyd_steinberg_quantize(im, palette_hex, dither=dither)
+    # quantize to palette (or adaptive 256)
+    if not palette_hex:
+        anchors = _load_general_anchors()
+        im = adaptive_quantize(im, colors=adaptive_colors or 256, dither=dither, anchors=anchors)
+    else:
+        im = floyd_steinberg_quantize(im, palette_hex, dither=dither)
     return im
