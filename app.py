@@ -142,14 +142,17 @@ class App(tk.Tk):
         ttk.Label(frm_set, text="Palette").grid(row=0, column=0, sticky='w')
         cmb = ttk.Combobox(frm_set, textvariable=self.palette_name, values=sorted(PALETTES.keys()), state="readonly", width=30)
         cmb.grid(row=0, column=1, sticky='w')
+
         def on_palette_change(event=None):
             name = self.palette_name.get()
             if name.startswith("General_") or name in ADAPTIVE_SPECIAL:
-                self.spin_adapt.state(["!disabled"])
+                if hasattr(self, "spin_adapt"):
+                    self.spin_adapt.state(["!disabled"])
             else:
-                self.spin_adapt.state(["disabled"])
+                if hasattr(self, "spin_adapt"):
+                    self.spin_adapt.state(["disabled"])
+
         cmb.bind("<<ComboboxSelected>>", on_palette_change)
-        on_palette_change()
 
         ttk.Label(frm_set, text="Block size").grid(row=0, column=2, sticky='e')
         ttk.Spinbox(frm_set, from_=1, to=16, textvariable=self.block, width=6).grid(row=0, column=3)
@@ -164,6 +167,9 @@ class App(tk.Tk):
         ttk.Label(frm_set, text="Adaptive colors").grid(row=1, column=6)
         self.spin_adapt = ttk.Spinbox(frm_set, from_=16, to=512, textvariable=self.adaptive_colors, width=6)
         self.spin_adapt.grid(row=1, column=7)
+
+        # 스핀박스가 만들어진 뒤에 초기 상태 설정
+        on_palette_change()
 
         # GIF options
         frm_gif = ttk.LabelFrame(self, text="GIF (optional)")
